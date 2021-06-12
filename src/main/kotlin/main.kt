@@ -1,5 +1,9 @@
 import java.io.File
-import java.io.FileNotFoundException
+import org.redundent.kotlin.xml.xml
+import java.io.BufferedOutputStream
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 data class Control(
     val pkg : String,
@@ -13,7 +17,6 @@ data class Control(
 )
 
 fun main(args: Array<String>) {
-    println("Hello World!")
     val packagesFolder = File(args[0])
     val aarFolder = packagesFolder.resolveSibling("aar")
     val aarBuildFolder = packagesFolder.resolveSibling("aar-build")
@@ -106,6 +109,45 @@ fun main(args: Array<String>) {
                 "library_name": "${control.pkg}"
             }
         """.trimIndent())
+
+        // AndroidManifest.xml
+        aarBuildFolder.resolve("AndroidManifest.xml")
+            .writeText(xml("manifest") {
+                attributes(
+                    "xmlns:android" to "http://schemas.android.com/apk/res/android",
+                    "package" to control.pkg,
+                    "android:versionCode" to 1,
+                    "android:versionName" to "1.0"
+                )
+
+                "uses-sdk" {
+                    attributes(
+                        "android:minSdkVersion" to 16,
+                        "android:targetSdkVersion" to 29
+                    )
+                }
+            }.toString())
+    }
+
+    // Create the aars
+    for(control in controls) {
+        val name = "${control.pkg}-${control.version}.aar"
+        val aarBuildFolder = aarBuildFolder.resolve(name)
+        val outputAar = aarFolder.resolve(name)
+        if (outputAar.exists()) {
+            outputAar.delete()
+        }
+        println(name)
+        ZipOutputStream(BufferedOutputStream(FileOutputStream(outputAar))).use { zos ->
+            aarBuildFolder.walkTopDown().forEach { file ->
+                val zipFileName = file.absolutePath.removePrefix(aarBuildFolder.absolutePath).removePrefix("/")
+                val entry = ZipEntry( "$zipFileName${(if (file.isDirectory) "/" else "" )}")
+                zos.putNextEntry(entry)
+                if (file.isFile) {
+                    file.inputStream().use { it.copyTo(zos) }
+                }
+            }
+        }
     }
 
     println(controls)

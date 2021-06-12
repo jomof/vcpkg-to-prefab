@@ -14,6 +14,7 @@ repositories {
 
 dependencies {
     testImplementation(kotlin("test-junit"))
+    implementation("org.redundent:kotlin-xml-builder:1.6.1")
 }
 
 tasks.test {

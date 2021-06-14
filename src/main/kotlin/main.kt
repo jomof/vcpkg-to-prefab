@@ -13,11 +13,17 @@ data class Control(
     val abiHash : String,
     val description : String?,
     val type : String,
-    val packageFolder : File
+    val packageFolder : File,
+    val name : String
 )
 
 fun main(args: Array<String>) {
     val packagesFolder = File(args[0])
+    val namespace = args[1]
+    val api32 = args[2]
+    val api64 = args[3]
+    val ndk = args[4]
+    val stl = args[5]
     val aarFolder = packagesFolder.resolveSibling("aar")
     val aarBuildFolder = packagesFolder.resolveSibling("aar-build")
     aarFolder.mkdirs()
@@ -44,79 +50,126 @@ fun main(args: Array<String>) {
                 abiHash = map.getValue("Abi"),
                 description = map["Description"],
                 type = map.getValue("Type"),
-                packageFolder = it.parentFile
+                packageFolder = it.parentFile,
+                name = "${map.getValue("Package")}-${map.getValue("Version")}.aar"
             )
         }
         .filter { it.architecture.endsWith("-android") }
+        //.filter { it.pkg.contains("boost-uninstall") }
 
     for(control in controls) {
-        val name = "${control.pkg}-${control.version}.aar"
-        val aarBuildFolder = aarBuildFolder.resolve(name)
-        val moduleFolder = aarBuildFolder.resolve("prefab/modules/${control.pkg}")
-        val platformId = when(control.architecture) {
-            "x64-android" -> "android.x86_64"
-            "arm-android" -> "android.armeabi-v7a"
-            "arm64-android" -> "android.arm64-v8a"
-            "x86-android" -> "android.x86"
-            else -> error(control.architecture)
-        }
-        val platformFolder = moduleFolder.resolve("libs/$platformId")
+        val aarBuildFolder = aarBuildFolder.resolve(control.name)
 
-        // Includes
-        val sourceIncludes = control.packageFolder.resolve("include")
-        if (sourceIncludes.isDirectory) {
-            val destIncludes = platformFolder.resolve("include")
-            destIncludes.mkdirs()
-            sourceIncludes.copyRecursively(destIncludes, overwrite = false) { _, e->
-                if (e !is FileAlreadyExistsException) throw e
-                OnErrorAction.SKIP
-            }
+        val (abi, api) = when(control.architecture) {
+            "x64-android" -> "x86_64" to api64
+            "arm-android" -> "armeabi-v7a" to api32
+            "arm64-android" -> "arm64-v8a" to api64
+            "x86-android" -> "x86" to api32
+            else -> error(control.architecture)
         }
 
         // Libs
-        val sourceLibs = control.packageFolder.resolve("lib")
-        if (sourceLibs.isDirectory) {
-            val destLibs = platformFolder
-            destLibs.mkdirs()
-            sourceLibs.copyRecursively(destLibs, overwrite = false) { _, e->
+        val sourceLibFolder = control.packageFolder.resolve("lib")
+        val sourceLibs = (sourceLibFolder.list() ?: arrayOf())
+            .toList()
+            .filter { it.endsWith(".so") or it.endsWith(".a") }
+            .map { sourceLibFolder.resolve(it) }
+
+        var moduleFolderName = control.pkg
+        for(sourceLib in sourceLibs) {
+            moduleFolderName = sourceLib.nameWithoutExtension.substring(3)
+        }
+        val moduleFolder = aarBuildFolder.resolve("prefab/modules/$moduleFolderName")
+        val destinationIncludes =
+            if (sourceLibs.isNotEmpty()) {
+                val platformFolder = moduleFolder.resolve("libs/android.$abi")
+                platformFolder.mkdirs()
+                for(sourceLib in sourceLibs) {
+                    val destinationLib = platformFolder.resolve(sourceLib.name)
+                    if (!destinationLib.exists()) {
+                        sourceLib.copyTo(destinationLib)
+                    }
+                }
+
+                // abi.json
+                val abiJson = platformFolder.resolve("abi.json")
+                platformFolder.mkdirs()
+                abiJson.writeText("""
+                    {"abi":"$abi","api":$api,"ndk":$ndk,"stl":"$stl"}
+                """.trimIndent())
+
+                // Includes at platform folder level
+                platformFolder.resolve("include")
+            } else {
+                // Includes at module folder level
+                moduleFolder.resolve("include")
+            }
+        val sourceIncludes = control.packageFolder.resolve("include")
+        if (sourceIncludes.isDirectory) {
+            destinationIncludes.mkdirs()
+            sourceIncludes.copyRecursively(destinationIncludes, overwrite = false) { _, e->
                 if (e !is FileAlreadyExistsException) throw e
                 OnErrorAction.SKIP
             }
         }
+
+        // module.json
+        val moduleJson = aarBuildFolder.resolve("prefab/modules/module.json")
+        for(sourceLib in sourceLibs) {
+            val libraryName = sourceLib.nameWithoutExtension.substring(3)
+            moduleJson.writeText(
+                """
+                {
+                    "library_name": "$libraryName"
+                }""".trimIndent())
+        }
+
+        // Skip empty packages
+        if (!aarBuildFolder.exists()) {
+            continue
+        }
+    }
+
+    // Calculate the names of packages created
+    val packageNames = mutableSetOf<String>()
+    for(control in controls) {
+        val aarBuildFolder = aarBuildFolder.resolve(control.name)
+        if (!aarBuildFolder.exists()) continue
+        packageNames.add(control.pkg)
+    }
+
+    // Add the per-package files if the folder exists
+    for(control in controls) {
+        val aarBuildFolder = aarBuildFolder.resolve(control.name)
+        if (!aarBuildFolder.exists()) continue
 
         // prefab.json
         val prefabJson = aarBuildFolder.resolve("prefab/prefab.json")
         prefabJson.parentFile.mkdirs()
         val dependencies = control.depends
-            ?.filter { !it.contains(":") }
+            ?.filter { packageNames.contains(it) }
             ?.joinToString { "\"${it}\"" }?.let {
-            "\"dependencies\": [ $it ]"
-        }
+                "\"dependencies\": [ $it ]"
+            } ?: "\"dependencies\": [ ]"
+        val version = if (isValidVersionForCMake(control.version)) control.version else "0.0.0"
         prefabJson.writeText("""
             {
                 "schema_version": 1,
                 "name": "${control.pkg}",
-                "version": "${control.version}",
+                "version": "$version",
                 $dependencies
             }
         """.trimIndent())
 
-        platformFolder.mkdirs()
-
-        // module.json
-        val moduleJson = aarBuildFolder.resolve("prefab/modules/module.json")
-        moduleJson.writeText("""
-            {
-                "library_name": "${control.pkg}"
-            }
-        """.trimIndent())
-
         // AndroidManifest.xml
+        val packageName = sanitize(
+            namespace,
+            control.pkg)
         aarBuildFolder.resolve("AndroidManifest.xml")
             .writeText(xml("manifest") {
                 attributes(
                     "xmlns:android" to "http://schemas.android.com/apk/res/android",
-                    "package" to control.pkg,
+                    "package" to packageName,
                     "android:versionCode" to 1,
                     "android:versionName" to "1.0"
                 )
@@ -130,15 +183,29 @@ fun main(args: Array<String>) {
             }.toString())
     }
 
-    // Create the aars
+    // Delete old aars
     for(control in controls) {
-        val name = "${control.pkg}-${control.version}.aar"
-        val aarBuildFolder = aarBuildFolder.resolve(name)
-        val outputAar = aarFolder.resolve(name)
+        val outputAar = aarFolder.resolve(control.name)
         if (outputAar.exists()) {
             outputAar.delete()
         }
-        println(name)
+    }
+
+    // Create the aars
+    val skipped = mutableSetOf<String>()
+    for(control in controls) {
+        val outputAar = aarFolder.resolve(control.name)
+        if (outputAar.exists()) continue
+        val aarBuildFolder = aarBuildFolder.resolve(control.name)
+        if (!aarBuildFolder.exists()) {
+            if (!skipped.contains(control.name)) {
+                skipped.add(control.name)
+                println("Skipping empty ${aarBuildFolder.name}")
+            }
+            continue
+        }
+
+        println(control.name)
         ZipOutputStream(BufferedOutputStream(FileOutputStream(outputAar))).use { zos ->
             aarBuildFolder.walkTopDown().forEach { file ->
                 val zipFileName = file.absolutePath.removePrefix(aarBuildFolder.absolutePath).removePrefix("/")
@@ -150,7 +217,18 @@ fun main(args: Array<String>) {
             }
         }
     }
-
-    println(controls)
-    println(types)
 }
+
+private val javaKeywords = listOf("static", "assert")
+fun sanitize(ns : String, pkg: String): String {
+    val result = if (pkg.contains("-")) {
+        val left = pkg.substringBefore("-")
+        val right = pkg.substringAfter("-").replace("-","")
+        "$ns.$left.$right"
+    } else "$ns.$pkg"
+    return result.split(".").map {
+        if (javaKeywords.contains(it)) "_$it" else it
+    }.joinToString(".")
+}
+internal fun isValidVersionForCMake(version: String): Boolean =
+    Regex("""^\d+(\.\d+(\.\d+(\.\d+)?)?)?$""").matches(version)

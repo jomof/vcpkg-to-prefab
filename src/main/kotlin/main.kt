@@ -86,6 +86,7 @@ fun main(args: Array<String>) {
 
         // prefab.json
         val prefabJson = aarBuildFolder.resolve("prefab/prefab.json")
+        prefabJson.parentFile.mkdirs()
         val dependencies = control.depends
             ?.filter { !it.contains(":") }
             ?.joinToString { "\"${it}\"" }?.let {

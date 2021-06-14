@@ -36,9 +36,9 @@ fun main(args: Array<String>) {
         .filter { it.isFile }
         .map {
             val map = mutableMapOf<String, String>()
-            it.readLines().map { line ->
+            for (line in it.readLines()) {
                 val index = line.indexOf(':')
-                if (index == -1) error("$it")
+                if (index == -1) break
                 map[line.substringBefore(':').trim()] = line.substringAfter(':').trim()
             }
             types.add(map["Type"]!!)

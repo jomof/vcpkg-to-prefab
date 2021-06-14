@@ -36,12 +36,20 @@ fun main(args: Array<String>) {
         .filter { it.isFile }
         .map {
             val map = mutableMapOf<String, String>()
+            var lastKey = ""
             for (line in it.readLines()) {
+                if (line.startsWith("   ")) {
+                    map[lastKey] = map.getValue(lastKey) + "\n" + line.trim()
+                    continue
+                }
                 val index = line.indexOf(':')
                 if (index == -1) break
-                map[line.substringBefore(':').trim()] = line.substringAfter(':').trim()
+                val key = line.substringBefore(':').trim()
+                val value = line.substringAfter(':').trim()
+                map[key] = value
+                lastKey = key
             }
-            types.add(map["Type"]!!)
+            types.add(map["Type"] ?: error(it))
             Control(
                 pkg = map.getValue("Package"),
                 version = map.getValue("Version"),

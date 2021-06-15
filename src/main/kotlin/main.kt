@@ -159,7 +159,7 @@ fun main(args: Array<String>) {
             ?.joinToString { "\"${it}\"" }?.let {
                 "\"dependencies\": [ $it ]"
             } ?: "\"dependencies\": [ ]"
-        val version = if (isValidVersionForCMake(control.version)) control.version else "0.0.0"
+        val version = sanitizeVersion(control.version)
         prefabJson.writeText("""
             {
                 "schema_version": 1,
@@ -225,6 +225,18 @@ fun main(args: Array<String>) {
             }
         }
     }
+}
+
+fun sanitizeVersion(version: String): String {
+    if (isValidVersionForCMake(version)) return version
+    var fixed = version.replace('-', '.')
+    if (isValidVersionForCMake(fixed)) return fixed
+    val stripped = StringBuilder()
+    for(c in fixed) {
+        if (c in '0'..'9' || c == '.') stripped.append(c)
+    }
+    if (isValidVersionForCMake(stripped.toString())) return stripped.toString()
+    error(version)
 }
 
 private val javaKeywords = listOf("static", "assert", "double")

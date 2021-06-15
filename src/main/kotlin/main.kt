@@ -227,7 +227,7 @@ fun main(args: Array<String>) {
     }
 }
 
-private val javaKeywords = listOf("static", "assert")
+private val javaKeywords = listOf("static", "assert", "double")
 fun sanitize(ns : String, pkg: String): String {
     val result = if (pkg.contains("-")) {
         val left = pkg.substringBefore("-")

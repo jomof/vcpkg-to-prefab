@@ -50,16 +50,17 @@ fun main(args: Array<String>) {
                 lastKey = key
             }
             types.add(map["Type"] ?: error(it))
+            val version = sanitizeVersion(map.getValue("Version"))
             Control(
                 pkg = map.getValue("Package"),
-                version = map.getValue("Version"),
+                version = version,
                 depends = map["Depends"]?.split(","),
                 architecture = map.getValue("Architecture"),
                 abiHash = map.getValue("Abi"),
                 description = map["Description"],
                 type = map.getValue("Type"),
                 packageFolder = it.parentFile,
-                name = "${map.getValue("Package")}-${map.getValue("Version")}.aar"
+                name = "${map.getValue("Package")}-$version.aar"
             )
         }
         .filter { it.architecture.endsWith("-android") }
@@ -159,12 +160,12 @@ fun main(args: Array<String>) {
             ?.joinToString { "\"${it}\"" }?.let {
                 "\"dependencies\": [ $it ]"
             } ?: "\"dependencies\": [ ]"
-        val version = sanitizeVersion(control.version)
+
         prefabJson.writeText("""
             {
                 "schema_version": 1,
                 "name": "${control.pkg}",
-                "version": "$version",
+                "version": "${control.version}",
                 $dependencies
             }
         """.trimIndent())

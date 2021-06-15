@@ -217,7 +217,10 @@ fun main(args: Array<String>) {
         println(control.name)
         ZipOutputStream(BufferedOutputStream(FileOutputStream(outputAar))).use { zos ->
             aarBuildFolder.walkTopDown().forEach { file ->
-                val zipFileName = file.absolutePath.removePrefix(aarBuildFolder.absolutePath).removePrefix("/")
+                val zipFileName = file.absolutePath
+                    .removePrefix(aarBuildFolder.absolutePath)
+                    .replace("\\", "/")
+                    .removePrefix("/")
                 val entry = ZipEntry( "$zipFileName${(if (file.isDirectory) "/" else "" )}")
                 zos.putNextEntry(entry)
                 if (file.isFile) {
